@@ -1,0 +1,20 @@
+	1.	Optimizar Complejidad Temporal
+Prompt: “Analiza y optimiza la complejidad temporal del siguiente código. Comienza describiendo las características de rendimiento originales del código, y luego propone modificaciones específicas para hacerlo más eficiente, explicando la razón detrás de cada sugerencia.”
+	2.	Refactorización para Modulación
+Prompt: “Guía el proceso de refactorización del siguiente código en componentes más pequeños y modulares para mejorar su mantenibilidad y organización. Proporciona un plan detallado paso a paso, destacando los principios clave involucrados.”
+	3.	Mejorar Manejo de Errores
+Prompt: “Mejora los mecanismos de manejo de errores en el siguiente código. Sugiere mejoras para proporcionar mensajes de error más informativos y fáciles de entender, y describe estrategias para asegurar un registro adecuado de los errores.”
+	4.	Revisión de Seguridad del Código
+Prompt: “Realiza una revisión de seguridad exhaustiva en el siguiente código. Identifica posibles vulnerabilidades de seguridad y describe cada una en detalle. Recomienda acciones correctivas específicas y justifica cada recomendación con mejores prácticas de seguridad.”
+	5.	Optimizar Complejidad Espacial
+Prompt: “Analiza el uso de memoria del siguiente código. Identifica fugas de memoria y propone mejoras concretas para reducir el consumo de memoria del programa, explicando cómo impactan en la eficiencia del código.”
+	6.	Eliminar Redundancia de Código
+Prompt: “Examina el siguiente código en busca de duplicación y redundancia. Ofrece estrategias prácticas para eliminar código redundante y mejorar la mantenibilidad del código, explicando por qué cada estrategia es efectiva.”
+	7.	Optimización de Consultas SQL
+Prompt: “Revisa la siguiente consulta de base de datos. Propón optimizaciones para mejorar su rendimiento, reducir la carga en la base de datos y mejorar la eficiencia de la recuperación de datos.”
+	8.	Identificar Olores de Código y Anti-patrones
+Prompt: “Inspecciona el siguiente código en busca de olores de código y anti-patrones. Señala ejemplos de malas prácticas de programación y ofrece recomendaciones para refactorizarlo y mejorar su calidad general.”
+	9.	Mejorar Pruebas Unitarias
+Prompt: “Mejora la calidad y cobertura de las pruebas unitarias para el siguiente código. Sugiere casos de prueba adicionales y refactoriza las pruebas existentes para una mejor legibilidad y cobertura.”
+	10.	Perfilado y Optimización del Rendimiento
+Prompt: “Realiza un análisis de rendimiento en el siguiente código para identificar cuellos de botella y áreas de mejora. Utiliza herramientas de perfilado para señalar problemas de rendimiento y sugiere optimizaciones específicas.”
