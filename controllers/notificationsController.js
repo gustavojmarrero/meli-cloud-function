@@ -3,6 +3,14 @@ const Notification = require('../models/meliNotification');
 
 const receiveNotification = async (req, res) => {
   const notificationData = req.body;
+  
+  // Si no hay _id, generamos uno basado en resource y user_id
+  if (!notificationData._id) {
+    const resourceId = notificationData.resource?.split('/').pop() || '';
+    const userId = notificationData.user_id || '';
+    notificationData._id = `${notificationData.topic}_${resourceId}_${userId}_${Date.now()}`;
+  }
+  
   try {
     const updatedNotification = await Notification.findOneAndUpdate(
       { _id: notificationData._id }, // Solo usamos _id en el filtro
