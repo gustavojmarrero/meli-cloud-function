@@ -82,57 +82,79 @@ const processPending = async (req, res) => {
 
         logger.info(`Procesando ${ordersToProcess.size} órdenes únicas pendientes.`);
 
-        // Procesar las órdenes que necesitan actualización
+        // Primero, obtener todas las órdenes de la API y recolectar SKUs
+        const ordersFromAPI = new Map();
+        const skusToSearch = new Set();
+        
         for (const [orderId, orderData] of ordersToProcess) {
             const response = await meliRequest(`orders/${orderId}`);
-            
             if (response.success) {
-                const orderInfo = response.data;
-                
-                // Preparar los datos según el esquema
-                const orderUpdate = {
-                    order_id: orderInfo.id,
-                    date_created: orderInfo.date_created,
-                    pack_id: orderInfo.pack_id || null,
-                    status: orderInfo.status,
-                    shipping_id: orderInfo.shipping?.id || null,
-                    buyer: {
-                        id: orderInfo.buyer.id,
-                        nickname: orderInfo.buyer.nickname,
-                        first_name: orderInfo.buyer.first_name || '',
-                        last_name: orderInfo.buyer.last_name || ''
-                    },
-                    order_items: orderInfo.order_items.map(item => ({
-                        id: item.item.id,
-                        title: item.item.title,
-                        category_id: item.item.category_id,
-                        variation_id: item.item.variation_id,
-                        seller_sku: item.item.seller_sku,
-                        quantity: item.quantity,
-                        unit_price: item.unit_price,
-                        sale_fee: item.sale_fee,
-                        product_cost: orderData.existingOrder?.order_items?.find(
-                            existingItem => existingItem.seller_sku === item.item.seller_sku
-                        )?.product_cost || 0
-                    }))
-                };
-
-                // Solo agregar shipping_id si necesitamos el costo
-                if (orderData.needsShippingCost && orderInfo.shipping?.id) {
-                    shippingIdsToProcess.add(orderInfo.shipping.id);
-                }
-
-                // Actualizar o crear la orden
-                await Order.findOneAndUpdate(
-                    { order_id: orderId },
-                    { $set: orderUpdate },
-                    { upsert: true, new: true }
-                );
-
-                logger.info(`Orden ${orderId} actualizada/creada correctamente.`);
-            } else {
-                logger.error(`Error al obtener datos de la orden ${orderId}: ${response.error}`);
+                ordersFromAPI.set(orderId, response.data);
+                response.data.order_items.forEach(item => {
+                    if (item.item.seller_sku) {
+                        skusToSearch.add(item.item.seller_sku);
+                    }
+                });
             }
+        }
+        
+        // Buscar todos los costos de una vez
+        const productCosts = await ProductCost.find({ 
+            sku: { $in: Array.from(skusToSearch) } 
+        }).lean();
+        
+        const costMap = new Map();
+        productCosts.forEach(product => {
+            costMap.set(product.sku, product.current_cost || 0);
+        });
+
+        // Procesar las órdenes que necesitan actualización
+        for (const [orderId, orderData] of ordersToProcess) {
+            const orderInfo = ordersFromAPI.get(orderId);
+            if (!orderInfo) {
+                logger.error(`No se pudo obtener datos de la orden ${orderId}`);
+                continue;
+            }
+            
+            // Preparar los datos según el esquema
+            const orderUpdate = {
+                order_id: orderInfo.id,
+                date_created: orderInfo.date_created,
+                pack_id: orderInfo.pack_id || null,
+                status: orderInfo.status,
+                shipping_id: orderInfo.shipping?.id || null,
+                buyer: {
+                    id: orderInfo.buyer.id,
+                    nickname: orderInfo.buyer.nickname,
+                    first_name: orderInfo.buyer.first_name || '',
+                    last_name: orderInfo.buyer.last_name || ''
+                },
+                order_items: orderInfo.order_items.map(item => ({
+                    id: item.item.id,
+                    title: item.item.title,
+                    category_id: item.item.category_id,
+                    variation_id: item.item.variation_id,
+                    seller_sku: item.item.seller_sku,
+                    quantity: item.quantity,
+                    unit_price: item.unit_price,
+                    sale_fee: item.sale_fee,
+                    product_cost: costMap.get(item.item.seller_sku) || 0
+                }))
+            };
+
+            // Solo agregar shipping_id si necesitamos el costo
+            if (orderData.needsShippingCost && orderInfo.shipping?.id) {
+                shippingIdsToProcess.add(orderInfo.shipping.id);
+            }
+
+            // Actualizar o crear la orden
+            await Order.findOneAndUpdate(
+                { order_id: orderId },
+                { $set: orderUpdate },
+                { upsert: true, new: true }
+            );
+
+            logger.info(`Orden ${orderId} actualizada/creada correctamente.`);
         }
 
         // Procesar costos de envío en batch
