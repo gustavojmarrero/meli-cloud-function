@@ -3,6 +3,109 @@ const AsinCatalogMapping = require('../models/asinCatalogMapping');
 const { meliRequest } = require('../config/meliconfig');
 const logger = require('../config/logger');
 
+const DEFAULT_SELLER_ID = 397528431;
+const DEFAULT_ZIP_CODE = '01000';
+
+const getReferenceItemId = (catalogMapping) => {
+    if (catalogMapping.mlm?.itemId) {
+        return catalogMapping.mlm.itemId;
+    }
+    if (Array.isArray(catalogMapping.itemIds) && catalogMapping.itemIds.length > 0) {
+        return catalogMapping.itemIds[catalogMapping.itemIds.length - 1];
+    }
+    if (catalogMapping.mlItemId) {
+        return catalogMapping.mlItemId;
+    }
+    return null;
+};
+
+const fetchLatestShippingCost = async (catalogMapping) => {
+    const result = {
+        shippingCost: catalogMapping.mlShippingCost,
+        sellerId: DEFAULT_SELLER_ID
+    };
+
+    const referenceItemId = getReferenceItemId(catalogMapping);
+    if (!referenceItemId) {
+        logger.warn(`No hay itemId de referencia para ${catalogMapping.mlCatalogId}, se usarán costos almacenados.`);
+        return result;
+    }
+
+    let sellerId = DEFAULT_SELLER_ID;
+
+    try {
+        const itemRes = await meliRequest(`items/${referenceItemId}`);
+        if (itemRes.success && itemRes.data?.seller_id) {
+            sellerId = itemRes.data.seller_id;
+        } else if (!itemRes.success) {
+            logger.warn(`No se pudo obtener seller_id para ${referenceItemId}: ${itemRes.error}`);
+        }
+    } catch (error) {
+        logger.error(`Error al obtener datos del item ${referenceItemId}:`, error.message || error);
+    }
+
+    try {
+        const shippingRes = await meliRequest(
+            `users/${sellerId}/shipping_options/free`,
+            'GET',
+            null,
+            {
+                params: {
+                    item_id: referenceItemId,
+                    zip_code: DEFAULT_ZIP_CODE,
+                    verbose: true
+                }
+            }
+        );
+
+        if (shippingRes.success) {
+            const listCost = Number(shippingRes.data?.coverage?.all_country?.list_cost);
+            if (!Number.isNaN(listCost)) {
+                result.shippingCost = listCost;
+            }
+        } else {
+            logger.warn(`No se pudo obtener costo de envío para ${referenceItemId}: ${shippingRes.error}`);
+        }
+    } catch (error) {
+        logger.error('Error al consultar costos de envío:', error.message || error);
+    }
+
+    result.sellerId = sellerId;
+    return result;
+};
+
+const fetchLatestSaleCommission = async (categoryId, priceForQuery, fallbackCommission) => {
+    let commission = fallbackCommission;
+
+    try {
+        const commissionRes = await meliRequest(
+            'sites/MLM/listing_prices',
+            'GET',
+            null,
+            {
+                params: {
+                    price: priceForQuery,
+                    listing_type_id: 'gold_special',
+                    category_id: categoryId
+                }
+            }
+        );
+
+        if (commissionRes.success) {
+            const percentageFee = Number(commissionRes.data?.sale_fee_details?.percentage_fee);
+            if (!Number.isNaN(percentageFee)) {
+                commission = Number((percentageFee / 100).toFixed(6));
+            }
+        } else {
+            logger.warn(`No se pudo obtener comisión actualizada: ${commissionRes.error}`);
+        }
+    } catch (error) {
+        logger.error('Error al consultar comisión en MercadoLibre:', error.message || error);
+    }
+
+    return commission;
+};
+
 /**
  * Publica un producto en el catálogo de MercadoLibre
  * @param {Object} req - Request con mlCatalogId y sku
@@ -34,16 +137,26 @@ const publishToCatalog = async (req, res) => {
             });
         }
 
+        const { shippingCost: latestShippingCost } = await fetchLatestShippingCost(catalogMapping);
+        const priceForCommission = catalogMapping.firstListingPrice || catalogMapping.amazonPrice || 100;
+        const latestSaleCommission = await fetchLatestSaleCommission(
+            catalogMapping.mlCategoryId,
+            priceForCommission,
+            catalogMapping.mlSaleCommission
+        );
+
         // Calcular el precio según las reglas del PRD
         let price;
         if (catalogMapping.firstListingPrice && catalogMapping.firstListingPrice > 0) {
             price = catalogMapping.firstListingPrice;
             logger.info(`Usando firstListingPrice: ${price}`);
         } else {
-            // Fórmula: Math.ceil((amazonPrice + mlShippingCost + 200) / (1 - mlSaleCommission))
-            const { amazonPrice, mlShippingCost, mlSaleCommission } = catalogMapping;
-            price = Math.ceil((amazonPrice + mlShippingCost + 200) / (1 - mlSaleCommission));
-            logger.info(`Precio calculado: ${price} (Amazon: ${amazonPrice}, Envío: ${mlShippingCost}, Comisión: ${mlSaleCommission})`);
+            const amazonPrice = catalogMapping.amazonPrice;
+            const shippingForPrice = typeof latestShippingCost === 'number' ? latestShippingCost : catalogMapping.mlShippingCost;
+            const commissionForPrice = typeof latestSaleCommission === 'number' ? latestSaleCommission : catalogMapping.mlSaleCommission;
+
+            price = Math.ceil((amazonPrice + shippingForPrice + 200) / (1 - commissionForPrice));
+            logger.info(`Precio calculado: ${price} (Amazon: ${amazonPrice}, Envío: ${shippingForPrice}, Comisión: ${commissionForPrice})`);
         }
 
         // Construir el payload exacto según el PRD
@@ -83,68 +196,17 @@ const publishToCatalog = async (req, res) => {
             });
         }
 
-        const { id: itemId, title, permalink, seller_id: apiSellerId } = response.data;
+        const { id: itemId, title, permalink } = response.data;
 
         logger.info(`Publicación creada exitosamente. ItemId: ${itemId}`);
 
-        // Calcular costos reales de envío y comisión obtenidos desde la API de ML
-        let updatedShippingCost = catalogMapping.mlShippingCost;
-        let updatedSaleCommission = catalogMapping.mlSaleCommission;
-
-        const sellerId = apiSellerId || 397528431;
-
-        try {
-            const shippingRes = await meliRequest(
-                `users/${sellerId}/shipping_options/free`,
-                'GET',
-                null,
-                {
-                    params: {
-                        item_id: itemId,
-                        zip_code: '01000',
-                        verbose: true
-                    }
-                }
-            );
-
-            if (shippingRes.success) {
-                const listCost = shippingRes.data?.coverage?.all_country?.list_cost;
-                const parsedCost = Number(listCost);
-                if (!Number.isNaN(parsedCost)) {
-                    updatedShippingCost = parsedCost;
-                }
-            } else {
-                logger.warn(`No se pudo obtener el costo de envío actualizado: ${shippingRes.error}`);
-            }
-        } catch (shippingError) {
-            logger.error('Error al consultar costo de envío en MercadoLibre:', shippingError.message || shippingError);
-        }
-
-        try {
-            const commissionRes = await meliRequest(
-                'sites/MLM/listing_prices',
-                'GET',
-                null,
-                {
-                    params: {
-                        price: price,
-                        listing_type_id: 'gold_special',
-                        category_id: catalogMapping.mlCategoryId
-                    }
-                }
-            );
-
-            if (commissionRes.success) {
-                const saleFeeAmount = Number(commissionRes.data?.sale_fee_amount);
-                if (!Number.isNaN(saleFeeAmount) && price > 0) {
-                    updatedSaleCommission = Number((saleFeeAmount / price).toFixed(6));
-                }
-            } else {
-                logger.warn(`No se pudo obtener la comisión actualizada: ${commissionRes.error}`);
-            }
-        } catch (commissionError) {
-            logger.error('Error al consultar comisión en MercadoLibre:', commissionError.message || commissionError);
-        }
+        const updatedShippingCost = latestShippingCost;
+        const updatedSaleCommission = latestSaleCommission;
+        const mlmData = {
+            itemId,
+            shippingCost: typeof updatedShippingCost === 'number' ? updatedShippingCost : catalogMapping.mlShippingCost,
+            saleCommission: typeof updatedSaleCommission === 'number' ? updatedSaleCommission : catalogMapping.mlSaleCommission
+        };
 
         // Actualizar la base de datos con la información de la publicación
         await AsinCatalogMapping.findOneAndUpdate(
@@ -153,7 +215,8 @@ const publishToCatalog = async (req, res) => {
                 $set: {
                     mlItemId: itemId,
                     lastPublishedAt: new Date(),
-                    sku: sku
+                    sku: sku,
+                    mlm: mlmData
                 },
                 $addToSet: {
                     itemIds: itemId
@@ -168,9 +231,11 @@ const publishToCatalog = async (req, res) => {
         const costUpdates = {};
         if (typeof updatedShippingCost === 'number' && Math.abs(updatedShippingCost - catalogMapping.mlShippingCost) > 0.01) {
             costUpdates.mlShippingCost = updatedShippingCost;
+            costUpdates['mlm.shippingCost'] = updatedShippingCost;
         }
         if (typeof updatedSaleCommission === 'number' && Math.abs(updatedSaleCommission - catalogMapping.mlSaleCommission) > 0.0001) {
             costUpdates.mlSaleCommission = updatedSaleCommission;
+            costUpdates['mlm.saleCommission'] = updatedSaleCommission;
         }
 
         if (Object.keys(costUpdates).length > 0) {
@@ -273,7 +338,8 @@ const getListings = async (req, res) => {
                 lastPublishedAt: 1,
                 amazonPrice: 1,
                 mlShippingCost: 1,
-                mlSaleCommission: 1
+                mlSaleCommission: 1,
+                mlm: 1
             }
         )
         .limit(parseInt(limit))
