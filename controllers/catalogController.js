@@ -7,14 +7,11 @@ const DEFAULT_SELLER_ID = 397528431;
 const DEFAULT_ZIP_CODE = '01000';
 
 const getReferenceItemId = (catalogMapping) => {
-    if (catalogMapping.mlm?.itemId) {
-        return catalogMapping.mlm.itemId;
+    if (catalogMapping.mlm) {
+        return catalogMapping.mlm;
     }
     if (Array.isArray(catalogMapping.itemIds) && catalogMapping.itemIds.length > 0) {
         return catalogMapping.itemIds[catalogMapping.itemIds.length - 1];
-    }
-    if (catalogMapping.mlItemId) {
-        return catalogMapping.mlItemId;
     }
     return null;
 };
@@ -148,23 +145,41 @@ const publishToCatalog = async (req, res) => {
         // Calcular el precio según las reglas del PRD
         let price;
         if (catalogMapping.firstListingPrice && catalogMapping.firstListingPrice > 0) {
-            price = catalogMapping.firstListingPrice;
+            price = Number(catalogMapping.firstListingPrice);
             logger.info(`Usando firstListingPrice: ${price}`);
         } else {
-            const amazonPrice = catalogMapping.amazonPrice;
-            const shippingForPrice = typeof latestShippingCost === 'number' ? latestShippingCost : catalogMapping.mlShippingCost;
-            const commissionForPrice = typeof latestSaleCommission === 'number' ? latestSaleCommission : catalogMapping.mlSaleCommission;
+            const amazonPrice = Number(catalogMapping.amazonPrice) || 0;
+            const shippingForPrice = typeof latestShippingCost === 'number' ? latestShippingCost : (Number(catalogMapping.mlShippingCost) || 0);
+            const commissionForPrice = typeof latestSaleCommission === 'number' ? latestSaleCommission : (Number(catalogMapping.mlSaleCommission) || 0.17);
+
+            // Validar que tenemos los valores necesarios
+            if (!amazonPrice || amazonPrice <= 0) {
+                logger.error(`Precio de Amazon inválido o no encontrado: ${amazonPrice}`);
+                return res.status(400).json({
+                    success: false,
+                    error: 'Precio de Amazon no válido para calcular el precio de venta'
+                });
+            }
 
             price = Math.ceil((amazonPrice + shippingForPrice + 200) / (1 - commissionForPrice));
             logger.info(`Precio calculado: ${price} (Amazon: ${amazonPrice}, Envío: ${shippingForPrice}, Comisión: ${commissionForPrice})`);
         }
 
+        // Validar que el precio es válido
+        if (!price || isNaN(price) || price <= 0) {
+            logger.error(`Precio calculado inválido: ${price}`);
+            return res.status(400).json({
+                success: false,
+                error: 'No se pudo calcular un precio válido para el producto'
+            });
+        }
+
         // Construir el payload exacto según el PRD
         const payload = {
             site_id: "MLM",
-            category_id: catalogMapping.mlCategoryId,
+            category_id: String(catalogMapping.mlCategoryId),
             official_store_id: 145264,
-            price: price,
+            price: Number(price),
             currency_id: "MXN",
             available_quantity: 0,
             buying_mode: "buy_it_now",
@@ -172,18 +187,19 @@ const publishToCatalog = async (req, res) => {
             attributes: [
                 {
                     id: "SELLER_SKU",
-                    value_name: sku
+                    value_name: String(sku)
                 },
                 {
                     id: "ITEM_CONDITION",
                     value_id: "2230284"
                 }
             ],
-            catalog_product_id: mlCatalogId,
+            catalog_product_id: String(mlCatalogId),
             catalog_listing: true
         };
 
         logger.info('Enviando solicitud a MercadoLibre API');
+        logger.info('Payload:', JSON.stringify(payload, null, 2));
 
         // Realizar la publicación en MercadoLibre
         const response = await meliRequest('items', 'POST', payload);
@@ -202,21 +218,15 @@ const publishToCatalog = async (req, res) => {
 
         const updatedShippingCost = latestShippingCost;
         const updatedSaleCommission = latestSaleCommission;
-        const mlmData = {
-            itemId,
-            shippingCost: typeof updatedShippingCost === 'number' ? updatedShippingCost : catalogMapping.mlShippingCost,
-            saleCommission: typeof updatedSaleCommission === 'number' ? updatedSaleCommission : catalogMapping.mlSaleCommission
-        };
 
         // Actualizar la base de datos con la información de la publicación
         await AsinCatalogMapping.findOneAndUpdate(
             { mlCatalogId },
             {
                 $set: {
-                    mlItemId: itemId,
                     lastPublishedAt: new Date(),
                     sku: sku,
-                    mlm: mlmData
+                    mlm: itemId
                 },
                 $addToSet: {
                     itemIds: itemId
@@ -231,11 +241,9 @@ const publishToCatalog = async (req, res) => {
         const costUpdates = {};
         if (typeof updatedShippingCost === 'number' && Math.abs(updatedShippingCost - catalogMapping.mlShippingCost) > 0.01) {
             costUpdates.mlShippingCost = updatedShippingCost;
-            costUpdates['mlm.shippingCost'] = updatedShippingCost;
         }
         if (typeof updatedSaleCommission === 'number' && Math.abs(updatedSaleCommission - catalogMapping.mlSaleCommission) > 0.0001) {
             costUpdates.mlSaleCommission = updatedSaleCommission;
-            costUpdates['mlm.saleCommission'] = updatedSaleCommission;
         }
 
         if (Object.keys(costUpdates).length > 0) {
@@ -330,10 +338,9 @@ const getListings = async (req, res) => {
         const { limit = 50, skip = 0 } = req.query;
 
         const listings = await AsinCatalogMapping.find(
-            { mlItemId: { $ne: null } },
+            { mlm: { $ne: null } },
             {
                 mlCatalogId: 1,
-                mlItemId: 1,
                 sku: 1,
                 lastPublishedAt: 1,
                 amazonPrice: 1,
@@ -346,7 +353,7 @@ const getListings = async (req, res) => {
         .skip(parseInt(skip))
         .sort({ lastPublishedAt: -1 });
 
-        const total = await AsinCatalogMapping.countDocuments({ mlItemId: { $ne: null } });
+        const total = await AsinCatalogMapping.countDocuments({ mlm: { $ne: null } });
 
         return res.status(200).json({
             success: true,

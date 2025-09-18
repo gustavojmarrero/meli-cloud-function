@@ -36,18 +36,8 @@ const asinCatalogMappingSchema = new Schema({
         default: null
     },
     mlm: {
-        itemId: {
-            type: String,
-            default: null
-        },
-        shippingCost: {
-            type: Number,
-            default: null
-        },
-        saleCommission: {
-            type: Number,
-            default: null
-        }
+        type: String,
+        default: null
     },
     lastPublishedAt: {
         type: Date,
