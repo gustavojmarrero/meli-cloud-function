@@ -2,8 +2,37 @@
 const { google } = require('googleapis');
 require('dotenv').config();
 
+// Validar variables de entorno al inicio
+const validateEnvironment = () => {
+  const requiredVars = ['GOOGLE_CREDENTIALS'];
+  const missingVars = requiredVars.filter(varName => !process.env[varName]);
+
+  if (missingVars.length > 0) {
+    console.error('❌ Error: Variables de entorno faltantes:', missingVars.join(', '));
+    console.error('Por favor, configure las variables de entorno necesarias.');
+    console.error('Consulte CLAUDE.md para instrucciones de despliegue con variables.');
+    throw new Error(`Variables de entorno faltantes: ${missingVars.join(', ')}`);
+  }
+};
+
 const authenticate = async () => {
-  const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  // Validar que las variables existen
+  validateEnvironment();
+
+  let credentials;
+  try {
+    credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  } catch (error) {
+    console.error('❌ Error: GOOGLE_CREDENTIALS no es un JSON válido');
+    console.error('Valor actual:', process.env.GOOGLE_CREDENTIALS ? 'Definido pero inválido' : 'No definido');
+    console.error('Consulte CLAUDE.md para el formato correcto de las credenciales.');
+    throw new Error('GOOGLE_CREDENTIALS debe ser un JSON válido. ' + error.message);
+  }
+
+  if (!credentials.private_key) {
+    throw new Error('GOOGLE_CREDENTIALS no contiene private_key');
+  }
+
   credentials.private_key = credentials.private_key.replace(/\\n/g, '\n');
 
   const auth = new google.auth.GoogleAuth({

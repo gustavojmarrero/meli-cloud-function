@@ -4,7 +4,9 @@
 	"description": "Aplicacion de gestion de mercado libre",
 	"main": "index.js",
 	"scripts": {
-		"deploy": "gcloud functions deploy meli --runtime nodejs20 --trigger-http --allow-unauthenticated",
+		"deploy": "python3 deploy-with-env.py",
+		"deploy:manual": "gcloud functions deploy meli --runtime nodejs20 --trigger-http --allow-unauthenticated",
+		"deploy:check": "gcloud functions describe meli --region=us-central1 --format='value(environmentVariables)'",
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"start": "functions-framework --target=meli"
 	},
