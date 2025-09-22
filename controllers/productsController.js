@@ -1,6 +1,7 @@
 // controllers/productCostController.js
 
 const ProductCost = require('../models/productCost');
+const Product = require('../models/product');
 const {
     readSheet,
     listGoogleSheetsInFolder,
@@ -370,11 +371,64 @@ if (require.main === module) {
     })();
 }
 
+// Función para obtener productos por inventoryIds
+const getProductsByInventoryIds = async (req, res) => {
+    try {
+        // Obtener los inventoryIds del cuerpo de la solicitud
+        const { inventoryIds } = req.body;
+
+        // Validar que se reciban inventoryIds
+        if (!inventoryIds || !Array.isArray(inventoryIds)) {
+            return res.status(400).json({
+                error: 'Se requiere un array de inventoryIds'
+            });
+        }
+
+        // Validar que no se excedan 20 IDs
+        if (inventoryIds.length > 20) {
+            return res.status(400).json({
+                error: 'Se pueden consultar hasta 20 inventoryIds por solicitud'
+            });
+        }
+
+        // Validar que haya al menos un ID
+        if (inventoryIds.length === 0) {
+            return res.status(400).json({
+                error: 'Se requiere al menos un inventoryId'
+            });
+        }
+
+        // Buscar productos en la base de datos
+        const products = await Product.find(
+            { inventoryId: { $in: inventoryIds } },
+            { inventoryId: 1, sku: 1, asin: 1, title: 1, _id: 0 } // Proyección de campos
+        ).lean();
+
+        // Log para seguimiento
+        logger.info(`Consulta de productos por inventoryIds: ${inventoryIds.length} solicitados, ${products.length} encontrados`);
+
+        // Devolver los productos encontrados
+        return res.status(200).json({
+            success: true,
+            requested: inventoryIds.length,
+            found: products.length,
+            products: products
+        });
+
+    } catch (error) {
+        logger.error('Error al obtener productos por inventoryIds', { error });
+        return res.status(500).json({
+            error: 'Error al obtener productos'
+        });
+    }
+};
+
 // Exportar las funciones
 module.exports = {
     initializeProductCosts,
     updateProductCosts,
     updateCosts,
+    getProductsByInventoryIds,
 };
 
 

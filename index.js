@@ -1,6 +1,31 @@
 // index.js
 const express = require('express');
+const cors = require('cors');
 const app = express();
+
+// Configuración de CORS
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      'https://myaccount.mercadolibre.com.mx',
+      'https://www.mercadolibre.com.mx',
+      'http://localhost:3000',
+      'http://localhost:8080'
+    ];
+
+    // Permitir requests sin origin (como Postman o curl)
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 // Middleware para parsear JSON
 app.use(express.json());
