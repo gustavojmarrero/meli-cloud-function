@@ -29,6 +29,11 @@ GOOGLE_CREDENTIALS=[VER ARCHIVO .env LOCAL - NO SUBIR A REPOSITORIO PÚBLICO]
 SPREADSHEET_ID=[VER ARCHIVO .env LOCAL]
 SHEET_RANGE=[VER ARCHIVO .env LOCAL]
 DRIVE_FOLDER_ID=[VER ARCHIVO .env LOCAL]
+
+# Análisis de Ganancias (Configuración opcional)
+TOP_PROFIT_LIMIT=50  # Número de SKUs a incluir en ranking (default: 50)
+PROFIT_ANALYSIS_DAYS=180  # Días de análisis para cálculo de ganancias (default: 180)
+COST_ANALYSIS_DAYS=365  # Días de análisis para cálculo de costo medio (default: 365)
 ```
 
 ## 🚀 Comando de Despliegue Completo
@@ -59,6 +64,87 @@ gcloud functions describe meli --region=us-central1 --format="value(environmentV
 Los siguientes endpoints requieren `GOOGLE_CREDENTIALS` para funcionar:
 - `POST /api/orders/export-sales` - Exporta ventas a Google Sheets
 - `POST /api/orders/export-visits` - Exporta visitas de productos a Google Sheets
+- `GET /api/reports/top-profit-skus` - Analiza y exporta TOP SKUs por ganancia a Google Sheets
+
+## 📊 Endpoint de Análisis de Ganancias: `/api/reports/top-profit-skus`
+
+### Descripción
+Analiza las ganancias de productos específicos, calcula costos medios de compra y exporta los TOP performers a Google Sheets.
+
+### Funcionamiento
+
+1. **Lee SKUs y ASINs desde Google Sheets**
+   - Documento: `1PKFCSNVsRR8wM6mOeckoJUYGqKrZ9oWrbvSf_7FHLD8`
+   - Hoja: `Lista`
+   - Rango: `B2:D` (SKUs en columna B, ASINs en columna D)
+
+2. **Calcula costo medio por ASIN**
+   - Consulta colección `controlDeCompras_d` en MongoDB
+   - Filtra compras por ASIN de los últimos N días (configurable con `COST_ANALYSIS_DAYS`, default: 365)
+   - Extrae campo `pDdescuento` (precio de compra con IVA)
+   - Calcula la **mediana** de todos los precios de compra
+   - La mediana representa el costo más común al que se compró el producto
+
+3. **Analiza órdenes de los últimos N días**
+   - Por defecto: últimos 180 días (configurable con `PROFIT_ANALYSIS_DAYS`)
+   - Filtra órdenes con estado `paid`
+   - Calcula ganancia por SKU usando la fórmula:
+     ```
+     ganancia = precioAcumulado - costoAcum - comisionVta - comisionEnvio
+     ```
+     Donde:
+     - `precioAcumulado = (unit_price × quantity) / 1.16` (sin IVA)
+     - `costoAcum = product_cost × quantity`
+     - `comisionVta = (sale_fee × quantity) / 1.16` (sin IVA)
+     - `comisionEnvio = shipping_cost / 1.16` (sin IVA)
+
+4. **Genera ranking y exporta**
+   - Ordena SKUs por ganancia total descendente
+   - Filtra solo SKUs con ganancia > 0
+   - Toma TOP N (configurable con `TOP_PROFIT_LIMIT`, default: 50)
+   - Exporta a hoja `GananciaTop50`:
+     - Columna A: SKU
+     - Columna B: ASIN
+     - Columna C: Ganancia total (formato 2 decimales)
+     - Columna D: Costo Medio (mediana de compras, formato 2 decimales)
+
+### Ejemplo de Uso
+```bash
+# Localmente
+curl http://localhost:8080/api/reports/top-profit-skus
+
+# En producción
+curl https://us-central1-your-project.cloudfunctions.net/meli/api/reports/top-profit-skus
+```
+
+### Respuesta Exitosa
+```json
+{
+  "message": "Exportación completada: TOP 50 SKUs exportados.",
+  "totalSkusAnalizados": 887,
+  "skusConGanancia": 50,
+  "topSkus": [
+    {
+      "sku": "GM000873",
+      "asin": "B09QVK6831",
+      "ganancia": "145696.26",
+      "costoMedio": "243.87"
+    },
+    {
+      "sku": "GM001015",
+      "asin": "B08XYZABC1",
+      "ganancia": "74846.62",
+      "costoMedio": "189.50"
+    },
+    ...
+  ]
+}
+```
+
+### Variables de Entorno
+- `TOP_PROFIT_LIMIT`: Número máximo de SKUs en el ranking (default: 50)
+- `PROFIT_ANALYSIS_DAYS`: Días hacia atrás para analizar ganancias (default: 180)
+- `COST_ANALYSIS_DAYS`: Días hacia atrás para calcular costo medio (default: 365)
 
 ## 🐛 Solución de Problemas
 

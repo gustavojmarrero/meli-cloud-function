@@ -34,11 +34,11 @@ app.use(express.json());
 
 // Importar y usar las rutas
 const meliNotificationsRoutes = require('./routes/notificationsRoutes');
-const procesPendingOrdersRoutes = require('./routes/ordersRoutes');
+const ordersRoutes = require('./routes/ordersRoutes');
 const productsRoutes = require('./routes/productsRoutes');
 
 app.use('/api/meliNotifications', meliNotificationsRoutes);
-app.use('/api/pendingOrders', procesPendingOrdersRoutes);
+app.use('/api/reports', ordersRoutes); // Cambiado de /api/pendingOrders a /api/reports
 app.use('/api/products', productsRoutes);
 
 // Manejo de errores genéricos

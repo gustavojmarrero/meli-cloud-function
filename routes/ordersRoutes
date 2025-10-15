@@ -2,11 +2,13 @@ const express = require('express');
 const router = express.Router();
 const { processPending } = require('../controllers/ordersController');
 const { exportSalesToSheet, exportVisitsToSheet } = require('../controllers/salesExportController');
+const { getTopProfitSkus } = require('../controllers/profitAnalysisController');
 const { initializeLastThreeDaysOrders } = require('../scripts/recuperarUltimos3Dias');
 
 router.post('/process-pending', processPending);
 router.post('/export-sales', exportSalesToSheet); // Nuevo endpoint para exportar ventas
 router.post('/export-visits', exportVisitsToSheet); // Nuevo endpoint para exportar visitas
+router.get('/top-profit-skus', getTopProfitSkus); // Endpoint para obtener TOP SKUs por ganancia
 
 // Endpoint temporal para recuperar órdenes de los últimos 3 días
 router.post('/recuperar-ultimos-3-dias', async (req, res) => {
