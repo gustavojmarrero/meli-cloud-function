@@ -37,7 +37,8 @@ const productsRoutes = require('./routes/productsRoutes');
 const catalogRoutes = require('./routes/catalogRoutes');
 
 app.use('/api/notifications', notificationsRoutes);
-app.use('/api/orders', ordersRoutes);
+app.use('/api/orders', ordersRoutes); // Endpoints de órdenes (export-sales, export-visits, process-pending)
+app.use('/api/reports', ordersRoutes); // Endpoint de reportes (top-profit-skus)
 app.use('/api/products', productsRoutes);
 app.use('/api/mercadolibre', catalogRoutes);
 
