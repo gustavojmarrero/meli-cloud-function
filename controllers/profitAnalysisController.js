@@ -16,16 +16,41 @@ const ANALYSIS_DAYS = parseInt(process.env.PROFIT_ANALYSIS_DAYS) || 180;
 const COST_ANALYSIS_DAYS = parseInt(process.env.COST_ANALYSIS_DAYS) || 365;
 
 /**
- * Calcula la mediana de un array de números
+ * Calcula la moda usando rangos dinámicos de ±5%
+ * 1. Para cada precio único, cuenta cuántos precios totales caen en su rango [precio*0.95, precio*1.05]
+ * 2. El rango con mayor densidad es el cluster modal
+ * 3. En caso de empate, usa el cluster con precio mínimo más bajo
+ * 4. Retorna el precio más bajo del cluster modal
  */
-const calcularMediana = (valores) => {
+const calcularModaConRangoDinamico = (valores, porcentaje = 0.05) => {
     if (valores.length === 0) return 0;
-    const sorted = [...valores].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    if (sorted.length % 2 === 0) {
-        return (sorted[mid - 1] + sorted[mid]) / 2;
-    }
-    return sorted[mid];
+    if (valores.length === 1) return valores[0];
+
+    // Obtener precios únicos como centros candidatos
+    const preciosUnicos = [...new Set(valores)].sort((a, b) => a - b);
+
+    let maxDensidad = 0;
+    let precioMinimoModal = Infinity;
+
+    // Para cada precio único, calcular densidad en su rango ±5%
+    preciosUnicos.forEach(precioCenter => {
+        const rangoMin = precioCenter * (1 - porcentaje);
+        const rangoMax = precioCenter * (1 + porcentaje);
+
+        // Contar precios totales en este rango
+        const preciosEnRango = valores.filter(p => p >= rangoMin && p <= rangoMax);
+        const densidad = preciosEnRango.length;
+        const precioMinimo = Math.min(...preciosEnRango);
+
+        // Actualizar si encontramos mayor densidad o misma densidad con precio menor
+        if (densidad > maxDensidad ||
+            (densidad === maxDensidad && precioMinimo < precioMinimoModal)) {
+            maxDensidad = densidad;
+            precioMinimoModal = precioMinimo;
+        }
+    });
+
+    return precioMinimoModal;
 };
 
 /**
@@ -87,9 +112,9 @@ const getTopProfitSkus = async (req, res) => {
 
             if (compras.length > 0) {
                 const precios = compras.map(c => parseFloat(c.pDdescuento));
-                const mediana = calcularMediana(precios);
-                costoMedioPorAsin.set(asin, mediana);
-                logger.info(`ASIN ${asin}: ${compras.length} compras, costo medio = $${mediana.toFixed(2)}`);
+                const moda = calcularModaConRangoDinamico(precios);
+                costoMedioPorAsin.set(asin, moda);
+                logger.info(`ASIN ${asin}: ${compras.length} compras, costo modal (±5%) = $${moda.toFixed(2)}`);
             }
         }
 

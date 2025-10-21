@@ -78,12 +78,16 @@ Analiza las ganancias de productos específicos, calcula costos medios de compra
    - Hoja: `Lista`
    - Rango: `B2:D` (SKUs en columna B, ASINs en columna D)
 
-2. **Calcula costo medio por ASIN**
+2. **Calcula costo modal por ASIN**
    - Consulta colección `controlDeCompras_d` en MongoDB
    - Filtra compras por ASIN de los últimos N días (configurable con `COST_ANALYSIS_DAYS`, default: 365)
    - Extrae campo `pDdescuento` (precio de compra con IVA)
-   - Calcula la **mediana** de todos los precios de compra
-   - La mediana representa el costo más común al que se compró el producto
+   - Calcula la **moda** usando rangos dinámicos de ±5%:
+     * Para cada precio, crea un rango [precio × 0.95, precio × 1.05]
+     * Encuentra el rango con mayor cantidad de compras (cluster modal)
+     * En caso de empate, usa el cluster con precio mínimo más bajo
+     * Retorna el precio más bajo del cluster más frecuente
+   - La moda representa el costo más común al que se compró el producto
 
 3. **Analiza órdenes de los últimos N días**
    - Por defecto: últimos 180 días (configurable con `PROFIT_ANALYSIS_DAYS`)
