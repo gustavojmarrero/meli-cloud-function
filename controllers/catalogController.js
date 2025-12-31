@@ -11,6 +11,10 @@ const DEFAULT_DIMENSIONS = {
     weight: 1000
 };
 
+// Configuración de retry para dimensiones insuficientes
+const MAX_DIMENSION_RETRIES = 5;
+const DIMENSION_INCREMENT = 1.10; // 10%
+
 const DEFAULT_SELLER_ID = 397528431;
 const DEFAULT_ZIP_CODE = '01000';
 
@@ -242,8 +246,58 @@ const publishToCatalog = async (req, res) => {
         logger.info('Enviando solicitud a MercadoLibre API');
         logger.info('Payload:', JSON.stringify(payload, null, 2));
 
-        // Realizar la publicación en MercadoLibre
-        const response = await meliRequest('items', 'POST', payload);
+        // Realizar la publicación en MercadoLibre con retry para dimensiones
+        let response = await meliRequest('items', 'POST', payload);
+        let dimensionRetries = 0;
+
+        // Retry loop para errores de dimensiones insuficientes
+        while (!response.success && dimensionRetries < MAX_DIMENSION_RETRIES) {
+            const errorDetails = response.details;
+
+            // Verificar si es error de dimensiones
+            if (errorDetails?.cause?.[0]?.code === 'item.attribute.invalid.seller.package.dimensions') {
+                const errorMessage = errorDetails.cause[0].message || '';
+                dimensionRetries++;
+
+                logger.info(`Reintento ${dimensionRetries}/${MAX_DIMENSION_RETRIES} por dimensiones insuficientes`);
+
+                // Parsear cuáles dimensiones fallaron
+                const failedDimensions = [];
+                if (errorMessage.includes('seller_package_width')) failedDimensions.push('width');
+                if (errorMessage.includes('seller_package_height')) failedDimensions.push('height');
+                if (errorMessage.includes('seller_package_length')) failedDimensions.push('length');
+                if (errorMessage.includes('seller_package_weight')) failedDimensions.push('weight');
+
+                // Si no se identificaron dimensiones específicas, aumentar todas
+                if (failedDimensions.length === 0) {
+                    failedDimensions.push('width', 'height', 'length', 'weight');
+                }
+
+                logger.info(`Dimensiones a ajustar: ${failedDimensions.join(', ')}`);
+
+                // Aumentar las dimensiones fallidas un 10%
+                failedDimensions.forEach(dim => {
+                    dimensions[dim] = Math.ceil(dimensions[dim] * DIMENSION_INCREMENT);
+                });
+
+                logger.info(`Dimensiones ajustadas: ${dimensions.length}x${dimensions.width}x${dimensions.height} cm, ${dimensions.weight}g`);
+
+                // Reconstruir payload con nuevas dimensiones
+                payload.attributes = payload.attributes.map(attr => {
+                    if (attr.id === 'SELLER_PACKAGE_LENGTH') return { id: attr.id, value_name: `${dimensions.length} cm` };
+                    if (attr.id === 'SELLER_PACKAGE_WIDTH') return { id: attr.id, value_name: `${dimensions.width} cm` };
+                    if (attr.id === 'SELLER_PACKAGE_HEIGHT') return { id: attr.id, value_name: `${dimensions.height} cm` };
+                    if (attr.id === 'SELLER_PACKAGE_WEIGHT') return { id: attr.id, value_name: `${dimensions.weight} g` };
+                    return attr;
+                });
+
+                // Reintentar
+                response = await meliRequest('items', 'POST', payload);
+            } else {
+                // No es error de dimensiones, salir del loop
+                break;
+            }
+        }
 
         if (!response.success) {
             logger.error(`Error en la API de MercadoLibre: ${response.error}`);
