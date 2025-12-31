@@ -1,6 +1,7 @@
 // controllers/catalogController.js
 const AsinCatalogMapping = require('../models/asinCatalogMapping');
 const { meliRequest } = require('../config/meliconfig');
+const { getProductDimensions } = require('../config/keepaConfig');
 const logger = require('../config/logger');
 
 const DEFAULT_SELLER_ID = 397528431;
@@ -174,6 +175,13 @@ const publishToCatalog = async (req, res) => {
             });
         }
 
+        // Obtener dimensiones del paquete desde Keepa
+        const asin = catalogMapping.asin || catalogMapping._doc?.asin;
+        logger.info(`mlCatalogId: ${mlCatalogId} -> ASIN encontrado: ${asin}`);
+        logger.info(`Documento completo: mlCatalogId=${catalogMapping.mlCatalogId}, asin=${catalogMapping.asin}, sku=${catalogMapping.sku}`);
+        const dimensions = await getProductDimensions(asin);
+        logger.info(`Dimensiones para publicación: ${dimensions.length}x${dimensions.width}x${dimensions.height} cm, ${dimensions.weight}g`);
+
         // Construir el payload exacto según el PRD
         const payload = {
             site_id: "MLM",
@@ -192,6 +200,22 @@ const publishToCatalog = async (req, res) => {
                 {
                     id: "ITEM_CONDITION",
                     value_id: "2230284"
+                },
+                {
+                    id: "SELLER_PACKAGE_LENGTH",
+                    value_name: `${dimensions.length} cm`
+                },
+                {
+                    id: "SELLER_PACKAGE_WIDTH",
+                    value_name: `${dimensions.width} cm`
+                },
+                {
+                    id: "SELLER_PACKAGE_HEIGHT",
+                    value_name: `${dimensions.height} cm`
+                },
+                {
+                    id: "SELLER_PACKAGE_WEIGHT",
+                    value_name: `${dimensions.weight} g`
                 }
             ],
             catalog_product_id: String(mlCatalogId),

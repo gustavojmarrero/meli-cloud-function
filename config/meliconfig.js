@@ -149,7 +149,10 @@ const meliRequest = async (endpoint, method = 'GET', data = null, config = {}) =
                     }
                 } else {
                     logger.error(`Error en la solicitud a ${endpoint}: ${errorMessage}`);
-                    return { success: false, error: errorMessage };
+                    if (error.response.data?.cause) {
+                        logger.error(`Detalles del error:`, JSON.stringify(error.response.data.cause, null, 2));
+                    }
+                    return { success: false, error: errorMessage, details: error.response.data };
                 }
             } else {
                 logger.error(`Error en la solicitud a ${endpoint}: ${error.message}`);
