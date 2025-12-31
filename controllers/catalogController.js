@@ -184,11 +184,12 @@ const publishToCatalog = async (req, res) => {
 
         // Obtener dimensiones del paquete (del payload o usar default)
         // Usar el máximo entre lo recibido y el default para evitar errores de ML
+        // IMPORTANTE: MercadoLibre solo acepta enteros, usar Math.ceil para redondear hacia arriba
         const dimensions = {
-            height: Math.max(packageDimensions?.height || 0, DEFAULT_DIMENSIONS.height),
-            width: Math.max(packageDimensions?.width || 0, DEFAULT_DIMENSIONS.width),
-            length: Math.max(packageDimensions?.length || 0, DEFAULT_DIMENSIONS.length),
-            weight: Math.max(packageDimensions?.weight || 0, DEFAULT_DIMENSIONS.weight)
+            height: Math.ceil(Math.max(packageDimensions?.height || 0, DEFAULT_DIMENSIONS.height)),
+            width: Math.ceil(Math.max(packageDimensions?.width || 0, DEFAULT_DIMENSIONS.width)),
+            length: Math.ceil(Math.max(packageDimensions?.length || 0, DEFAULT_DIMENSIONS.length)),
+            weight: Math.ceil(Math.max(packageDimensions?.weight || 0, DEFAULT_DIMENSIONS.weight))
         };
 
         if (packageDimensions) {
