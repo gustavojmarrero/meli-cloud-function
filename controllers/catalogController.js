@@ -1,8 +1,15 @@
 // controllers/catalogController.js
 const AsinCatalogMapping = require('../models/asinCatalogMapping');
 const { meliRequest } = require('../config/meliconfig');
-const { getProductDimensions } = require('../config/keepaConfig');
 const logger = require('../config/logger');
+
+// Dimensiones por defecto del paquete (17x14x14 cm, 1 kg)
+const DEFAULT_DIMENSIONS = {
+    height: 17,
+    width: 14,
+    length: 14,
+    weight: 1000
+};
 
 const DEFAULT_SELLER_ID = 397528431;
 const DEFAULT_ZIP_CODE = '01000';
@@ -111,7 +118,7 @@ const fetchLatestSaleCommission = async (categoryId, priceForQuery, fallbackComm
  */
 const publishToCatalog = async (req, res) => {
     try {
-        const { mlCatalogId, sku } = req.body;
+        const { mlCatalogId, sku, packageDimensions } = req.body;
 
         // Validar datos de entrada
         if (!mlCatalogId || !sku) {
@@ -175,12 +182,21 @@ const publishToCatalog = async (req, res) => {
             });
         }
 
-        // Obtener dimensiones del paquete desde Keepa
-        const asin = catalogMapping.asin || catalogMapping._doc?.asin;
-        logger.info(`mlCatalogId: ${mlCatalogId} -> ASIN encontrado: ${asin}`);
-        logger.info(`Documento completo: mlCatalogId=${catalogMapping.mlCatalogId}, asin=${catalogMapping.asin}, sku=${catalogMapping.sku}`);
-        const dimensions = await getProductDimensions(asin);
-        logger.info(`Dimensiones para publicación: ${dimensions.length}x${dimensions.width}x${dimensions.height} cm, ${dimensions.weight}g`);
+        // Obtener dimensiones del paquete (del payload o usar default)
+        // Usar el máximo entre lo recibido y el default para evitar errores de ML
+        const dimensions = {
+            height: Math.max(packageDimensions?.height || 0, DEFAULT_DIMENSIONS.height),
+            width: Math.max(packageDimensions?.width || 0, DEFAULT_DIMENSIONS.width),
+            length: Math.max(packageDimensions?.length || 0, DEFAULT_DIMENSIONS.length),
+            weight: Math.max(packageDimensions?.weight || 0, DEFAULT_DIMENSIONS.weight)
+        };
+
+        if (packageDimensions) {
+            logger.info(`Dimensiones recibidas: ${packageDimensions.length}x${packageDimensions.width}x${packageDimensions.height} cm, ${packageDimensions.weight}g`);
+        } else {
+            logger.info('No se recibieron dimensiones, usando valores default');
+        }
+        logger.info(`Dimensiones finales: ${dimensions.length}x${dimensions.width}x${dimensions.height} cm, ${dimensions.weight}g`);
 
         // Construir el payload exacto según el PRD
         const payload = {
