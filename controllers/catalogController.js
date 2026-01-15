@@ -154,27 +154,40 @@ const publishToCatalog = async (req, res) => {
             catalogMapping.mlSaleCommission
         );
 
+        // Obtener valores para cálculo de precio
+        const amazonPrice = Number(catalogMapping.amazonPrice) || 0;
+        const shippingForPrice = typeof latestShippingCost === 'number' ? latestShippingCost : (Number(catalogMapping.mlShippingCost) || 0);
+        const commissionForPrice = typeof latestSaleCommission === 'number' ? latestSaleCommission : (Number(catalogMapping.mlSaleCommission) || 0.17);
+
+        // Validar que tenemos los valores necesarios
+        if (!amazonPrice || amazonPrice <= 0) {
+            logger.error(`Precio de Amazon inválido o no encontrado: ${amazonPrice}`);
+            return res.status(400).json({
+                success: false,
+                error: 'Precio de Amazon no válido para calcular el precio de venta'
+            });
+        }
+
+        // Calcular precio mínimo garantizando ganancia (60 pesos o 10% ROI)
+        const minimumPriceFor60Profit = (amazonPrice + shippingForPrice + 60) / (1 - commissionForPrice);
+        const minimumPriceFor10PercentROI = (amazonPrice * 1.1 + shippingForPrice) / (1 - commissionForPrice);
+        const minimumPrice = Math.ceil(Math.max(minimumPriceFor60Profit, minimumPriceFor10PercentROI));
+
         // Calcular el precio según las reglas del PRD
         let price;
-        if (catalogMapping.firstListingPrice && catalogMapping.firstListingPrice > 0) {
-            price = Number(catalogMapping.firstListingPrice);
-            logger.info(`Usando firstListingPrice: ${price}`);
-        } else {
-            const amazonPrice = Number(catalogMapping.amazonPrice) || 0;
-            const shippingForPrice = typeof latestShippingCost === 'number' ? latestShippingCost : (Number(catalogMapping.mlShippingCost) || 0);
-            const commissionForPrice = typeof latestSaleCommission === 'number' ? latestSaleCommission : (Number(catalogMapping.mlSaleCommission) || 0.17);
+        const firstListingPrice = Number(catalogMapping.firstListingPrice) || 0;
 
-            // Validar que tenemos los valores necesarios
-            if (!amazonPrice || amazonPrice <= 0) {
-                logger.error(`Precio de Amazon inválido o no encontrado: ${amazonPrice}`);
-                return res.status(400).json({
-                    success: false,
-                    error: 'Precio de Amazon no válido para calcular el precio de venta'
-                });
+        if (firstListingPrice > 0) {
+            if (firstListingPrice >= minimumPrice) {
+                price = firstListingPrice;
+                logger.info(`Usando firstListingPrice: ${price}`);
+            } else {
+                price = minimumPrice;
+                logger.warn(`firstListingPrice (${firstListingPrice}) menor que mínimo (${minimumPrice}), usando mínimo`);
             }
-
-            price = Math.ceil((amazonPrice + shippingForPrice + 200) / (1 - commissionForPrice));
-            logger.info(`Precio calculado: ${price} (Amazon: ${amazonPrice}, Envío: ${shippingForPrice}, Comisión: ${commissionForPrice})`);
+        } else {
+            price = minimumPrice;
+            logger.info(`Precio mínimo calculado: ${price} (Amazon: ${amazonPrice}, Envío: ${shippingForPrice}, Comisión: ${commissionForPrice})`);
         }
 
         // Validar que el precio es válido
