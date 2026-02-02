@@ -5,7 +5,7 @@
 	"main": "index.js",
 	"scripts": {
 		"deploy": "python3 deploy-with-env.py",
-		"deploy:manual": "gcloud functions deploy meli --runtime nodejs20 --trigger-http --allow-unauthenticated",
+		"deploy:manual": "gcloud functions deploy meli --runtime nodejs22 --trigger-http --allow-unauthenticated",
 		"deploy:check": "gcloud functions describe meli --region=us-central1 --format='value(environmentVariables)'",
 		"test": "echo \"Error: no test specified\" && exit 1",
 		"start": "functions-framework --target=meli"
@@ -27,6 +27,6 @@
 		"winston": "^3.14.2"
 	},
 	"engines": {
-		"node": "20"
+		"node": "22"
 	}
 }

@@ -77,11 +77,11 @@ def deploy_function(env_file):
     """Despliega la función a Google Cloud Functions"""
     print("🔄 Desplegando función a Google Cloud Functions...")
     print("   Región: us-central1")
-    print("   Runtime: nodejs20")
+    print("   Runtime: nodejs22")
 
     cmd = [
         'gcloud', 'functions', 'deploy', 'meli',
-        '--runtime', 'nodejs20',
+        '--runtime', 'nodejs22',
         '--trigger-http',
         '--allow-unauthenticated',
         '--region', 'us-central1',
