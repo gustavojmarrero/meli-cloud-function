@@ -1,7 +1,7 @@
 // controllers/meliNotificationController.js
 const Notification = require('../models/meliNotification');
 
-const INVENTORY_APP_URL = process.env.INVENTORY_APP_URL || 'https://inventory-app-f52ryed3da-uc.a.run.app';
+const INVENTORY_APP_URL = process.env.INVENTORY_APP_URL || 'https://inventory-app-713792767554.us-central1.run.app';
 const INVENTORY_API_KEY = process.env.INVENTORY_API_KEY || '';
 
 /**
