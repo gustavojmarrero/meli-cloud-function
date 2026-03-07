@@ -227,18 +227,40 @@ const closeMeliPublication = async (itemId) => {
  */
 const publishToCatalog = async (req, res) => {
     try {
-        const { mlCatalogId, sku, packageDimensions } = req.body;
+        const { mlCatalogId, packageDimensions } = req.body;
 
         // Validar datos de entrada
-        if (!mlCatalogId || !sku) {
-            logger.error('Faltan parámetros requeridos: mlCatalogId o sku');
+        if (!mlCatalogId) {
+            logger.error('Falta parámetro requerido: mlCatalogId');
             return res.status(400).json({
                 success: false,
-                error: 'mlCatalogId y sku son requeridos'
+                error: 'mlCatalogId es requerido'
             });
         }
 
-        logger.info(`Iniciando publicación para mlCatalogId: ${mlCatalogId}, sku: ${sku}`);
+        logger.info(`Iniciando publicación para mlCatalogId: ${mlCatalogId}`);
+
+        // Obtener siguiente SKU de intranet
+        let sku;
+        try {
+            const skuRes = await fetch(`${INVENTORY_APP_URL}/api/products/next-sku`, {
+                headers: { 'x-api-key': INVENTORY_API_KEY }
+            });
+            if (!skuRes.ok) {
+                const errorBody = await skuRes.text();
+                throw new Error(`(${skuRes.status}): ${errorBody}`);
+            }
+            const skuData = await skuRes.json();
+            sku = skuData.sku;
+            if (!sku) throw new Error('Respuesta sin campo sku');
+            logger.info(`SKU obtenido de intranet: ${sku}`);
+        } catch (skuError) {
+            logger.error(`Error obteniendo next-sku de intranet: ${skuError.message}`);
+            return res.status(500).json({
+                success: false,
+                error: `No se pudo obtener SKU de intranet: ${skuError.message}`
+            });
+        }
 
         // Buscar datos del mapeo en la base de datos
         const catalogMapping = await AsinCatalogMapping.findOne({ mlCatalogId });
