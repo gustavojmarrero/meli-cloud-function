@@ -136,7 +136,7 @@ const createProductInIntranet = async (catalogMapping, sku, itemId, title, dimen
         mlm: itemId,
         upc: catalogMapping.catalogIdentifier,
         img: catalogMapping.image,
-        current_cost: catalogMapping.amazonPrice,
+        current_cost: catalogMapping.amazonPrice / 1.16,
         packageLength: dimensions.length,
         packageWidth: dimensions.width,
         packageHeight: dimensions.height,
