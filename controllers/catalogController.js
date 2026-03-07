@@ -3,6 +3,9 @@ const AsinCatalogMapping = require('../models/asinCatalogMapping');
 const { meliRequest } = require('../config/meliconfig');
 const logger = require('../config/logger');
 
+const INVENTORY_APP_URL = process.env.INVENTORY_APP_URL || 'https://inventory-app-713792767554.us-central1.run.app';
+const INVENTORY_API_KEY = process.env.INVENTORY_API_KEY || '';
+
 // Dimensiones por defecto del paquete (17x14x14 cm, 1 kg)
 const DEFAULT_DIMENSIONS = {
     height: 17,
@@ -113,6 +116,108 @@ const fetchLatestSaleCommission = async (categoryId, priceForQuery, fallbackComm
     }
 
     return commission;
+};
+
+const MAX_INTRANET_RETRIES = 3;
+const INTRANET_RETRY_DELAY_MS = 1000;
+
+const isTransientError = (error, response) => {
+    if (!response) return true; // Error de red (timeout, DNS, conexión rechazada)
+    const status = response.status;
+    return status >= 500 || status === 429;
+};
+
+const createProductInIntranet = async (catalogMapping, sku, itemId, title, dimensions) => {
+    // Paso 1: Crear producto
+    const productPayload = {
+        sku,
+        title,
+        asin: catalogMapping.asin,
+        mlm: itemId,
+        upc: catalogMapping.catalogIdentifier,
+        img: catalogMapping.image,
+        current_cost: catalogMapping.amazonPrice,
+        packageLength: dimensions.length,
+        packageWidth: dimensions.width,
+        packageHeight: dimensions.height,
+        packageWeight: dimensions.weight / 1000,
+        isActive: true
+    };
+
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_INTRANET_RETRIES; attempt++) {
+        let createRes;
+        try {
+            createRes = await fetch(`${INVENTORY_APP_URL}/api/products`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': INVENTORY_API_KEY
+                },
+                body: JSON.stringify(productPayload)
+            });
+        } catch (networkError) {
+            lastError = networkError;
+            if (attempt < MAX_INTRANET_RETRIES) {
+                logger.warn(`Intento ${attempt}/${MAX_INTRANET_RETRIES} falló por error de red para ${sku}: ${networkError.message}. Reintentando...`);
+                await new Promise(r => setTimeout(r, INTRANET_RETRY_DELAY_MS * attempt));
+                continue;
+            }
+            throw new Error(`Error de red creando producto en intranet tras ${MAX_INTRANET_RETRIES} intentos: ${networkError.message}`);
+        }
+
+        if (createRes.status === 409) {
+            logger.info(`Producto ${sku} ya existe en intranet (409), continuando.`);
+            break;
+        } else if (!createRes.ok) {
+            const errorBody = await createRes.text();
+            lastError = new Error(`Error creando producto en intranet (${createRes.status}): ${errorBody}`);
+            if (isTransientError(null, createRes) && attempt < MAX_INTRANET_RETRIES) {
+                logger.warn(`Intento ${attempt}/${MAX_INTRANET_RETRIES} falló (${createRes.status}) para ${sku}. Reintentando...`);
+                await new Promise(r => setTimeout(r, INTRANET_RETRY_DELAY_MS * attempt));
+                continue;
+            }
+            throw lastError;
+        } else {
+            logger.info(`Producto ${sku} creado en intranet exitosamente.`);
+            break;
+        }
+    }
+
+    // Paso 2: Agregar barcodes alternos
+    if (Array.isArray(catalogMapping.identifiers) && catalogMapping.identifiers.length > 0) {
+        for (const identifier of catalogMapping.identifiers) {
+            try {
+                const barcodeRes = await fetch(`${INVENTORY_APP_URL}/api/products/${sku}/alternate-barcodes`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': INVENTORY_API_KEY
+                    },
+                    body: JSON.stringify({
+                        barcode: identifier,
+                        type: 'ean',
+                        addedBy: 'info@guatevermexico.com',
+                        source: 'sync-catalog-publish'
+                    })
+                });
+                if (!barcodeRes.ok) {
+                    logger.warn(`No se pudo agregar barcode ${identifier} para ${sku}: ${barcodeRes.status}`);
+                }
+            } catch (err) {
+                logger.warn(`Error agregando barcode ${identifier} para ${sku}: ${err.message}`);
+            }
+        }
+    }
+};
+
+const closeMeliPublication = async (itemId) => {
+    try {
+        await meliRequest(`items/${itemId}`, 'PUT', { status: 'closed' });
+        logger.info(`Publicación ${itemId} cerrada (rollback).`);
+    } catch (err) {
+        logger.error(`Error al cerrar publicación ${itemId} durante rollback: ${err.message}`);
+    }
 };
 
 /**
@@ -259,6 +364,9 @@ const publishToCatalog = async (req, res) => {
         logger.info('Enviando solicitud a MercadoLibre API');
         logger.info('Payload:', JSON.stringify(payload, null, 2));
 
+        // Guardar dimensiones originales antes del retry (el retry las infla para ML)
+        const originalDimensions = { ...dimensions };
+
         // Realizar la publicación en MercadoLibre con retry para dimensiones
         let response = await meliRequest('items', 'POST', payload);
         let dimensionRetries = 0;
@@ -324,6 +432,18 @@ const publishToCatalog = async (req, res) => {
 
         logger.info(`Publicación creada exitosamente. ItemId: ${itemId}`);
 
+        // Crear producto en intranet (sync-inventory)
+        try {
+            await createProductInIntranet(catalogMapping, sku, itemId, title, originalDimensions);
+        } catch (intranetError) {
+            logger.error(`Error creando producto en intranet para SKU ${sku}: ${intranetError.message}`);
+            await closeMeliPublication(itemId);
+            return res.status(500).json({
+                success: false,
+                error: `Producto publicado en ML pero falló la creación en intranet. Se cerró la publicación ${itemId}. Detalle: ${intranetError.message}`
+            });
+        }
+
         const updatedShippingCost = latestShippingCost;
         const updatedSaleCommission = latestSaleCommission;
 
@@ -367,7 +487,8 @@ const publishToCatalog = async (req, res) => {
                 title: title || 'Título del producto',
                 mlShippingCost: updatedShippingCost,
                 mlSaleCommission: updatedSaleCommission,
-                permalink: permalink
+                permalink: permalink,
+                intranetProductCreated: true
             }
         };
 

@@ -49,7 +49,12 @@ const asinCatalogMappingSchema = new Schema({
     },
     itemIds: [{
         type: String
-    }]
+    }],
+    asin: { type: String, default: null },
+    identifiers: [{ type: String }],
+    catalogIdentifier: { type: String, default: null },
+    image: { type: String, default: null },
+    title: { type: String, default: null }
 }, {
     collection: 'asincatalogmappings',
     timestamps: true
