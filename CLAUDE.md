@@ -30,6 +30,10 @@ SPREADSHEET_ID=[VER ARCHIVO .env LOCAL]
 SHEET_RANGE=[VER ARCHIVO .env LOCAL]
 DRIVE_FOLDER_ID=[VER ARCHIVO .env LOCAL]
 
+# Backend de Inventario (intranet / sync-inventory)
+INVENTORY_APP_URL=https://inventory-app-713792767554.us-central1.run.app
+INVENTORY_API_KEY=[VER ARCHIVO .env LOCAL]
+
 # Análisis de Ganancias (Configuración opcional)
 TOP_PROFIT_LIMIT=50  # Número de SKUs a incluir en ranking (default: 50)
 PROFIT_ANALYSIS_DAYS=180  # Días de análisis para cálculo de ganancias (default: 180)
@@ -37,6 +41,13 @@ COST_ANALYSIS_DAYS=365  # Días de análisis para cálculo de costo medio (defau
 ```
 
 ## 🚀 Comando de Despliegue Completo
+
+### Proyecto GCP
+La función `meli` está desplegada en el proyecto **`intranet-guatever`** (región `us-central1`).
+Antes de desplegar, verificar que el proyecto activo sea el correcto:
+```bash
+gcloud config set project intranet-guatever
+```
 
 ### ⚠️ IMPORTANTE: USAR SOLO EL SCRIPT PYTHON
 El script bash fue eliminado porque corrompía el formato JSON de las credenciales.
@@ -65,6 +76,10 @@ Los siguientes endpoints requieren `GOOGLE_CREDENTIALS` para funcionar:
 - `POST /api/orders/export-sales` - Exporta ventas a Google Sheets
 - `POST /api/orders/export-visits` - Exporta visitas de productos a Google Sheets
 - `GET /api/reports/top-profit-skus` - Analiza y exporta TOP SKUs por ganancia a Google Sheets
+
+Los siguientes endpoints requieren `INVENTORY_API_KEY` para funcionar:
+- `POST /api/mercadolibre/catalog-publish` - Publica en ML y crea producto en intranet (obtiene SKU, crea producto, agrega barcodes)
+- Notificaciones `stock-locations` - Reenvía stock al backend de inventario
 
 ## 📊 Endpoint de Análisis de Ganancias: `/api/reports/top-profit-skus`
 
@@ -163,7 +178,8 @@ curl https://us-central1-your-project.cloudfunctions.net/meli/api/reports/top-pr
 ## 📋 Checklist de Despliegue
 
 - [ ] Archivo `.env` local tiene todas las variables
-- [ ] Usar script `deploy.sh` o comando completo con `--set-env-vars`
+- [ ] Verificar proyecto GCP: `gcloud config set project intranet-guatever`
+- [ ] Usar script Python: `npm run deploy` o `python3 deploy-with-env.py`
 - [ ] Verificar variables con `gcloud functions describe`
 - [ ] Probar endpoints de exportación después del despliegue
 - [ ] NO confiar en que `.env` se subirá (está en .gitignore)
