@@ -118,6 +118,15 @@ const fetchLatestSaleCommission = async (categoryId, priceForQuery, fallbackComm
     return commission;
 };
 
+const MAX_INTRANET_RETRIES = 3;
+const INTRANET_RETRY_DELAY_MS = 1000;
+
+const isTransientError = (error, response) => {
+    if (!response) return true; // Error de red (timeout, DNS, conexión rechazada)
+    const status = response.status;
+    return status >= 500 || status === 429;
+};
+
 const createProductInIntranet = async (catalogMapping, sku, itemId, title, dimensions) => {
     // Paso 1: Crear producto
     const productPayload = {
@@ -135,22 +144,44 @@ const createProductInIntranet = async (catalogMapping, sku, itemId, title, dimen
         isActive: true
     };
 
-    const createRes = await fetch(`${INVENTORY_APP_URL}/api/products`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': INVENTORY_API_KEY
-        },
-        body: JSON.stringify(productPayload)
-    });
+    let lastError;
+    for (let attempt = 1; attempt <= MAX_INTRANET_RETRIES; attempt++) {
+        let createRes;
+        try {
+            createRes = await fetch(`${INVENTORY_APP_URL}/api/products`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': INVENTORY_API_KEY
+                },
+                body: JSON.stringify(productPayload)
+            });
+        } catch (networkError) {
+            lastError = networkError;
+            if (attempt < MAX_INTRANET_RETRIES) {
+                logger.warn(`Intento ${attempt}/${MAX_INTRANET_RETRIES} falló por error de red para ${sku}: ${networkError.message}. Reintentando...`);
+                await new Promise(r => setTimeout(r, INTRANET_RETRY_DELAY_MS * attempt));
+                continue;
+            }
+            throw new Error(`Error de red creando producto en intranet tras ${MAX_INTRANET_RETRIES} intentos: ${networkError.message}`);
+        }
 
-    if (createRes.status === 409) {
-        logger.info(`Producto ${sku} ya existe en intranet (409), continuando.`);
-    } else if (!createRes.ok) {
-        const errorBody = await createRes.text();
-        throw new Error(`Error creando producto en intranet (${createRes.status}): ${errorBody}`);
-    } else {
-        logger.info(`Producto ${sku} creado en intranet exitosamente.`);
+        if (createRes.status === 409) {
+            logger.info(`Producto ${sku} ya existe en intranet (409), continuando.`);
+            break;
+        } else if (!createRes.ok) {
+            const errorBody = await createRes.text();
+            lastError = new Error(`Error creando producto en intranet (${createRes.status}): ${errorBody}`);
+            if (isTransientError(null, createRes) && attempt < MAX_INTRANET_RETRIES) {
+                logger.warn(`Intento ${attempt}/${MAX_INTRANET_RETRIES} falló (${createRes.status}) para ${sku}. Reintentando...`);
+                await new Promise(r => setTimeout(r, INTRANET_RETRY_DELAY_MS * attempt));
+                continue;
+            }
+            throw lastError;
+        } else {
+            logger.info(`Producto ${sku} creado en intranet exitosamente.`);
+            break;
+        }
     }
 
     // Paso 2: Agregar barcodes alternos
@@ -333,6 +364,9 @@ const publishToCatalog = async (req, res) => {
         logger.info('Enviando solicitud a MercadoLibre API');
         logger.info('Payload:', JSON.stringify(payload, null, 2));
 
+        // Guardar dimensiones originales antes del retry (el retry las infla para ML)
+        const originalDimensions = { ...dimensions };
+
         // Realizar la publicación en MercadoLibre con retry para dimensiones
         let response = await meliRequest('items', 'POST', payload);
         let dimensionRetries = 0;
@@ -400,7 +434,7 @@ const publishToCatalog = async (req, res) => {
 
         // Crear producto en intranet (sync-inventory)
         try {
-            await createProductInIntranet(catalogMapping, sku, itemId, title, dimensions);
+            await createProductInIntranet(catalogMapping, sku, itemId, title, originalDimensions);
         } catch (intranetError) {
             logger.error(`Error creando producto en intranet para SKU ${sku}: ${intranetError.message}`);
             await closeMeliPublication(itemId);
